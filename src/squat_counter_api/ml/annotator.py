@@ -68,9 +68,23 @@ def _build_rep_map(peaks, num_frames):
     import numpy as np
 
     rep_map = np.zeros(num_frames, dtype=int)
+    if len(peaks) == 0:
+        return rep_map
+
+    # To match the research notebook perfectly and ensure the HUD updates
+    # during the descent of the first rep, we ensure the mapping starts from frame 0.
+    # We treat the range from frame 0 up to the second peak as Rep 1, etc.
+    # Actually, the most robust way is:
+    # Rep 1: 0 -> peaks[0] (the first standing-up point)
+    # Rep 2: peaks[0] -> peaks[1]
+    # ...
+    last_peak = 0
     for r, peak in enumerate(peaks):
-        end = peaks[r + 1] if r + 1 < len(peaks) else num_frames
-        rep_map[peak:end] = r + 1
+        rep_map[last_peak:peak] = r + 1
+        last_peak = peak
+    # Post-peak frames are part of the "next" rep
+    if last_peak < num_frames:
+        rep_map[last_peak:] = len(peaks) + 1
     return rep_map
 
 
@@ -93,15 +107,19 @@ def _draw_hud(cv2, frame, knee_angle, lean_angle, current_rep, total_reps,
     cv2.putText(frame, f"Rep: {current_rep}/{total_reps}", (20, y),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, TEXT_WHITE, 2)
     y += 28
-    if first_degraded and current_rep >= first_degraded:
-        text = f"Form: DEGRADED (Rep {first_degraded}+)"
-        color = DEPTH_DEGRADED
-    elif first_degraded and current_rep > 0:
-        text = "Form: OK"
-        color = DEPTH_OK
-    else:
+
+    # Logic updated to match research notebook: 
+    # Show OK if no degradation is found, instead of defaulting to ---
+    if current_rep == 0:
         text = "Form: ---"
         color = (200, 200, 200)
+    elif first_degraded and current_rep >= first_degraded:
+        text = f"Form: DEGRADED (Rep {first_degraded}+)"
+        color = DEPTH_DEGRADED
+    else:
+        text = "Form: OK"
+        color = DEPTH_OK
+    
     cv2.putText(frame, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
     cv2.putText(frame, f"Frame {frame_idx}/{total_frames}",
