@@ -5,11 +5,14 @@ panel onto each frame of the uploaded video. Returns H.264 mp4 bytes.
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+logger = logging.getLogger("squat_counter_api.annotator")
 
 from squat_counter_api.ml.signal import (
     BASELINE_REPS,
@@ -214,7 +217,9 @@ def render_annotated_video(
 
     # Transcode mp4v -> H.264 (avc1) for universal browser playback and smaller size.
     final_path_obj = raw_path_obj
-    if shutil.which("ffmpeg"):
+    if not shutil.which("ffmpeg"):
+        logger.warning("ffmpeg not found in PATH; returning raw mp4v output (large, limited browser support)")
+    else:
         fd2, h264_path = tempfile.mkstemp(suffix=".mp4", prefix="annotated_h264_")
         os.close(fd2)
         h264_obj = Path(h264_path)
@@ -230,10 +235,17 @@ def render_annotated_video(
                     str(h264_obj),
                 ],
                 check=True,
-                timeout=120,
+                timeout=60,
             )
             final_path_obj = h264_obj
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        except subprocess.TimeoutExpired:
+            logger.error("ffmpeg transcode timed out after 60s; falling back to raw mp4v")
+            try:
+                h264_obj.unlink()
+            except FileNotFoundError:
+                pass
+        except subprocess.CalledProcessError as exc:
+            logger.error("ffmpeg transcode failed (rc=%s); falling back to raw mp4v", exc.returncode)
             try:
                 h264_obj.unlink()
             except FileNotFoundError:

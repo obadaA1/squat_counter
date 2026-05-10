@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import functools
+import logging
 from functools import lru_cache
 
-from fastapi import FastAPI, HTTPException, UploadFile, status
+from fastapi import FastAPI, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from squat_counter_api.api.errors import http_exception_handler, unhandled_exception_handler
 from squat_counter_api.api.middleware import request_id_middleware
@@ -14,7 +20,9 @@ from squat_counter_api.core.logging import configure_logging
 from squat_counter_api.core.settings import get_settings
 from squat_counter_api.ml.analyzer import SquatAnalyzer
 
+logger = logging.getLogger("squat_counter_api")
 settings = get_settings()
+PREDICT_TIMEOUT_SECONDS = 240
 
 
 class SquatAnalyzerService:
@@ -69,6 +77,9 @@ def create_app() -> FastAPI:
         docs_url=None,
         redoc_url=None,
     )
+    limiter = Limiter(key_func=get_remote_address, default_limits=[])
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.middleware("http")(request_id_middleware)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
@@ -109,12 +120,22 @@ def create_app() -> FastAPI:
         return get_analyzer_service().info()
 
     @app.post("/predict", response_model=SquatPredictionResponse)
-    async def predict(file: UploadFile, annotate: bool = False) -> SquatPredictionResponse:
+    @limiter.limit("10/minute")
+    async def predict(request: Request, file: UploadFile, annotate: bool = False) -> SquatPredictionResponse:
         video_bytes = await read_valid_mp4(file, settings.max_video_bytes)
         service = get_analyzer_service()
         if not service.ready:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=service.status.message)
-        return service.analyze(video_bytes, annotate=annotate)
+        loop = asyncio.get_running_loop()
+        call = functools.partial(service.analyze, video_bytes, annotate=annotate)
+        try:
+            return await asyncio.wait_for(loop.run_in_executor(None, call), timeout=PREDICT_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("predict exceeded %ss budget", PREDICT_TIMEOUT_SECONDS)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=f"Analysis exceeded {PREDICT_TIMEOUT_SECONDS}s. Try a shorter clip.",
+            )
 
     return app
 
