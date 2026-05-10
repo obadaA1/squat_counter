@@ -114,7 +114,7 @@ def z_scores(metric_values, baseline_n: int = BASELINE_REPS):
     if len(values) == 0:
         return values
     if len(values) <= baseline_n:
-        baseline_n = max(1, len(values) - 1)
+        return np.zeros_like(values, dtype=float)
     mean = np.mean(values[:baseline_n])
     std = np.std(values[:baseline_n]) + 1e-8
     return (values - mean) / std
@@ -124,7 +124,9 @@ def first_flagged_rep(*score_arrays, threshold: float = Z_THRESHOLD) -> int | No
     if not score_arrays:
         return None
     end = min(len(scores) for scores in score_arrays)
-    start = min(BASELINE_REPS, max(0, end - 1))
+    if end <= BASELINE_REPS:
+        return None
+    start = BASELINE_REPS
     for index in range(start, end):
         if any(abs(float(scores[index])) > threshold for scores in score_arrays):
             return index + 1
@@ -138,11 +140,15 @@ def metrics_from_keypoints(keypoints):
     valleys = find_bottom_frames(smoothed)
     depth = compute_depth_ratio(keypoints, valleys)
     lean = compute_torso_lean(keypoints, valleys)
+    rep_count = len(peaks)
+    metric_count = min(rep_count, len(depth), len(lean))
+    depth = depth[:metric_count]
+    lean = lean[:metric_count]
     z_depth = z_scores(depth)
     z_lean = z_scores(lean)
     degradation_start = first_flagged_rep(z_depth, z_lean)
     rows = []
-    for index in range(min(len(depth), len(lean))):
+    for index in range(metric_count):
         rows.append(
             {
                 "rep": index + 1,
@@ -153,4 +159,4 @@ def metrics_from_keypoints(keypoints):
                 "flagged": abs(float(z_depth[index])) > Z_THRESHOLD or abs(float(z_lean[index])) > Z_THRESHOLD,
             }
         )
-    return len(peaks), degradation_start, rows
+    return rep_count, degradation_start, rows

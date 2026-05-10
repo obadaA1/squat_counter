@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from squat_counter_api.api import app as app_module
 from squat_counter_api.api.schemas import ModelInfoResponse
 from squat_counter_api.core.artifacts import validate_artifacts
+from squat_counter_api.ml.signal import first_flagged_rep, metrics_from_keypoints, z_scores
 
 
 def valid_mp4_bytes() -> bytes:
@@ -66,3 +67,36 @@ def test_model_info_with_mocked_service(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["version"] == "v1-test"
+
+
+def test_per_rep_metrics_do_not_exceed_detected_rep_count(monkeypatch):
+    import squat_counter_api.ml.signal as signal
+
+    class NP:
+        @staticmethod
+        def asarray(values, dtype=None):
+            return values
+
+    monkeypatch.setattr(signal, "knee_angles_from_mediapipe", lambda keypoints: [160, 80, 160, 80, 160])
+    monkeypatch.setattr(signal, "smooth_angles", lambda angles: angles)
+    monkeypatch.setattr(signal, "count_reps", lambda angles: [0, 2])
+    monkeypatch.setattr(signal, "find_bottom_frames", lambda angles: [0, 1, 2])
+    monkeypatch.setattr(signal, "compute_depth_ratio", lambda keypoints, valleys: [1.0, 1.1, 1.2])
+    monkeypatch.setattr(signal, "compute_torso_lean", lambda keypoints, valleys: [20.0, 22.0, 40.0])
+    monkeypatch.setattr(signal, "z_scores", lambda values: values)
+
+    rep_count, degradation_start, rows = metrics_from_keypoints([])
+
+    assert rep_count == 2
+    assert len(rows) == 2
+    assert degradation_start is None or degradation_start <= rep_count
+
+
+def test_short_sets_do_not_report_degradation_before_baseline():
+    z_depth = z_scores([1.0, 1.2])
+    z_lean = z_scores([30.0, 40.0])
+    degradation_start = first_flagged_rep(z_depth, z_lean)
+
+    assert z_depth.tolist() == [0.0, 0.0]
+    assert z_lean.tolist() == [0.0, 0.0]
+    assert degradation_start is None
