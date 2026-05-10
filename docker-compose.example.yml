@@ -1,0 +1,25 @@
+services:
+  squat-api:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=512m,nosuid,nodev
+    ports:
+      - "127.0.0.1:8012:8000"
+    environment:
+      SQUAT_MODEL_ROOT: /models/squat/current
+      SQUAT_CORS_ORIGINS: https://obadaalsehli.com,http://localhost:3000
+    volumes:
+      - /models/squat:/models/squat:ro
+      - /data/squat:/data/squat:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

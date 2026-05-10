@@ -1,0 +1,2 @@
+"""Production squat counter service."""
+
