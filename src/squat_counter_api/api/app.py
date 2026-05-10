@@ -47,13 +47,13 @@ class SquatAnalyzerService:
             metrics=self.status.metadata.get("metrics", {}),
         )
 
-    def analyze(self, video_bytes: bytes) -> SquatPredictionResponse:
+    def analyze(self, video_bytes: bytes, annotate: bool = False) -> SquatPredictionResponse:
         if not self.ready:
             raise RuntimeError(self.status.message)
         self.load()
         if self._analyzer is None:
             raise RuntimeError("Analyzer failed to load.")
-        return self._analyzer.analyze(video_bytes)
+        return self._analyzer.analyze(video_bytes, annotate=annotate)
 
 
 @lru_cache
@@ -109,12 +109,12 @@ def create_app() -> FastAPI:
         return get_analyzer_service().info()
 
     @app.post("/predict", response_model=SquatPredictionResponse)
-    async def predict(file: UploadFile) -> SquatPredictionResponse:
+    async def predict(file: UploadFile, annotate: bool = False) -> SquatPredictionResponse:
         video_bytes = await read_valid_mp4(file, settings.max_video_bytes)
         service = get_analyzer_service()
         if not service.ready:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=service.status.message)
-        return service.analyze(video_bytes)
+        return service.analyze(video_bytes, annotate=annotate)
 
     return app
 

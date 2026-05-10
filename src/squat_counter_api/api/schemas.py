@@ -26,6 +26,7 @@ class SquatPredictionResponse(BaseModel):
     degradation_start_rep: int | None
     per_rep_metrics: list[RepMetric]
     annotated_frames: list[str] = Field(default_factory=list)
+    annotated_video_b64: str | None = None
 
 
 class HealthResponse(BaseModel):

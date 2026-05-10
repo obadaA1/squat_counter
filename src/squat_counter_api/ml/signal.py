@@ -134,6 +134,11 @@ def first_flagged_rep(*score_arrays, threshold: float = Z_THRESHOLD) -> int | No
 
 
 def metrics_from_keypoints(keypoints):
+    rep_count, degradation_start, rows, _peaks = metrics_and_peaks_from_keypoints(keypoints)
+    return rep_count, degradation_start, rows
+
+
+def metrics_and_peaks_from_keypoints(keypoints):
     angles = knee_angles_from_mediapipe(keypoints)
     smoothed = smooth_angles(angles)
     peaks = count_reps(smoothed)
@@ -159,4 +164,4 @@ def metrics_from_keypoints(keypoints):
                 "flagged": abs(float(z_depth[index])) > Z_THRESHOLD or abs(float(z_lean[index])) > Z_THRESHOLD,
             }
         )
-    return rep_count, degradation_start, rows
+    return rep_count, degradation_start, rows, peaks
